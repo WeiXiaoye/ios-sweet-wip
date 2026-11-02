@@ -1,0 +1,84 @@
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -14,6 +14,10 @@
+ #include <kern/sched_prim.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
++#include <sys/vnode.h>
++#include <sys/vnode_if.h>
++#include <sys/uio_internal.h>
++#include <sys/fcntl.h>
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ /* Mach MIG declaration is not included by BSD's exported thread.h. */
+@@ -746,6 +750,62 @@
+ 	return true;
+ }
+ 
++/* read the bounding-path asset through VFS and report what comes back */
++static void
++sweet_probe_asset_file(void)
++{
++	static const char path[] =
++	    "/System/Library/PrivateFrameworks/UIKitCore.framework/BoundingPathData.bundle/Assets.car";
++	vfs_context_t ctx = vfs_context_create(NULL);
++	vnode_t vp = NULL;
++	errno_t err = vnode_open(path, FREAD, 0, 0, &vp, ctx);
++	printf("SWEET FILE: open err=%d\n", err);
++	if (err != 0 || vp == NULL) {
++		vfs_context_rele(ctx);
++		return;
++	}
++	struct vnode_attr va;
++	VATTR_INIT(&va);
++	VATTR_WANTED(&va, va_data_size);
++	int gerr = vnode_getattr(vp, &va, ctx);
++	printf("SWEET FILE: getattr err=%d size=%lld\n", gerr, (long long)va.va_data_size);
++	uint8_t buf[4096];
++	uint64_t total = 0;
++	uint32_t sum = 0;
++	off_t size = gerr == 0 ? (off_t)va.va_data_size : 0;
++	for (off_t off = 0; off < size; off += (off_t)sizeof(buf)) {
++		size_t want = sizeof(buf);
++		if (off + (off_t)want > size) {
++			want = (size_t)(size - off);
++		}
++		uio_t uio = uio_create(1, off, UIO_SYSSPACE, UIO_READ);
++		if (uio == NULL) {
++			printf("SWEET FILE: uio_create failed\n");
++			break;
++		}
++		uio_addiov(uio, (uintptr_t)buf, want);
++		int rerr = VNOP_READ(vp, uio, 0, ctx);
++		int resid = (int)uio_resid(uio);
++		uio_free(uio);
++		if (rerr != 0 || resid != 0) {
++			printf("SWEET FILE: read off=%lld want=%zu err=%d resid=%d\n",
++			    (long long)off, want, rerr, resid);
++			break;
++		}
++		if (off == 0) {
++			printf("SWEET FILE: first=%02x %02x %02x %02x\n",
++			    buf[0], buf[1], buf[2], buf[3]);
++		}
++		for (size_t i = 0; i < want; i++) {
++			sum = sum * 31u + buf[i];
++		}
++		total += want;
++	}
++	printf("SWEET FILE: read total=%llu sum=%08x\n", total, sum);
++	vnode_close(vp, FREAD, ctx);
++	vfs_context_rele(ctx);
++}
++
+ static void
+ touch_thread(void *arg, wait_result_t result)
+ {
+@@ -847,6 +907,7 @@
+ 	printf("SWEET TOUCH: probe 0x49 (ST FTS) err=%d id=%02x%02x%02x%02x\n",
+ 	    ste, st_id[0], st_id[1], st_id[2], st_id[3]);
+ 	st.probing = false;
++	sweet_probe_asset_file();
+ 	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && gid[3] == '6';
+ 	bool fts = !fe1 && !fe2 && fid1 == 0x54 && fid2 == 0x52;
+ 	bool stfts = !ste && st_id[0] != 0x00u && st_id[0] != 0xffu;
