@@ -1,0 +1,33 @@
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -808,6 +808,30 @@
+ 		printf("SWEET TOUCH: bb selftest sda low=%u high=%u scl low=%u high=%u\n",
+ 		    sda_low, sda_high, scl_low, scl_high);
+ 	}
++	/* drive each line high/low/release and report IO + CTL, to tell a broken
++	 * register access from a bus that something else holds low */
++	{
++		struct { const char *name; unsigned pin; } lines[2] = {
++			{ "sda", BB_SDA }, { "scl", BB_SCL },
++		};
++		for (unsigned i = 0; i < 2; i++) {
++			touch_gpio(lines[i].pin, 0, 3, 3, true, true);
++			touch_wait(1);
++			printf("SWEET TOUCH: %s drive high io=%u ctl=%#x\n", lines[i].name,
++			    bb_level(lines[i].pin),
++			    touch_rd(st.gpio, TOUCH_GPIO_CFG(lines[i].pin)));
++			touch_gpio(lines[i].pin, 0, 3, 3, true, false);
++			touch_wait(1);
++			printf("SWEET TOUCH: %s drive low  io=%u ctl=%#x\n", lines[i].name,
++			    bb_level(lines[i].pin),
++			    touch_rd(st.gpio, TOUCH_GPIO_CFG(lines[i].pin)));
++			touch_gpio(lines[i].pin, 0, 3, 3, false, false);
++			touch_wait(1);
++			printf("SWEET TOUCH: %s pullup     io=%u ctl=%#x\n", lines[i].name,
++			    bb_level(lines[i].pin),
++			    touch_rd(st.gpio, TOUCH_GPIO_CFG(lines[i].pin)));
++		}
++	}
+ 	uint8_t gid[32], legacy[32], fid1 = 0, fid2 = 0;
+ 	st.probing = true;
+ 	int ge = touch_probe_info(GOODIX_PID_REG, gid);
