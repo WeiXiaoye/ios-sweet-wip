@@ -1,0 +1,37 @@
+--- a/bsd/kern/sweet_amfi.c
++++ b/bsd/kern/sweet_amfi.c
+@@ -378,6 +378,15 @@
+  * docs/EXTENSION_CACHE.md. Every other op keeps the old answer, ENOPOLICY.
+  */
+ #define SWEET_AMFI_OP_BOOTARG_STATE     0x60
++/*
++ * op 0x5a, amfi_interface_check_dyld_policy: dyld asks what it may do for the
++ * process it is starting -- @paths, the DYLD_* variables, inserted libraries,
++ * interposing. Answer "everything": that is what lets DYLD_INSERT_LIBRARIES
++ * from a launchd job environment load our software CoreAnimation renderer into
++ * backboardd. Argument: { u64 flags in, user_addr_t flags out }.
++ */
++#define SWEET_AMFI_OP_CHECK_DYLD_POLICY 0x5a
++#define SWEET_AMFI_DYLD_ALLOW_ALL       0xffULL
+ static uint64_t sweet_amfi_ops_seen[4];
+ 
+ static int
+@@ -393,6 +402,18 @@
+ 		uint64_t state = 0x86;
+ 		return copyout(&state, arg, sizeof(state));
+ 	}
++	if (call == SWEET_AMFI_OP_CHECK_DYLD_POLICY) {
++		struct {
++			uint64_t input_flags;
++			user_addr_t output_flags;
++		} args;
++		uint64_t flags = SWEET_AMFI_DYLD_ALLOW_ALL;
++		int error = copyin(arg, &args, sizeof(args));
++		if (error == 0) {
++			error = copyout(&flags, args.output_flags, sizeof(flags));
++		}
++		return error;
++	}
+ 	return ENOPOLICY;
+ }
+ 
