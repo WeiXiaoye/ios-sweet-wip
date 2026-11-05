@@ -1,0 +1,69 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -5713,6 +5713,66 @@
+ 	imgp->ip_endargv = imgp->ip_strendp;
+ 	imgp->ip_envc = 0;
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	/*
++	 * sweetinject=<dylib>:<substring of the exec path>
++	 *
++	 * launchd strips DYLD_* from the environment of the jobs it starts, so this
++	 * is the only place where the variable can be added. The named AMFI policy
++	 * answers dyld's op 0x5a with "allow everything", which is what makes dyld
++	 * honour it for a platform binary such as backboardd.
++	 */
++	{
++		static char sweet_arg[192];
++		static char *sweet_dylib;
++		static const char *sweet_want;
++		static int sweet_parsed;
++		if (!sweet_parsed) {
++			sweet_parsed = 1;
++			if (PE_parse_boot_argn("sweetinject", sweet_arg, sizeof(sweet_arg))) {
++				char *colon = strchr(sweet_arg, ':');
++				if (colon != NULL) {
++					*colon = '\0';
++					sweet_dylib = sweet_arg;
++					sweet_want = colon + 1;
++				}
++			}
++		}
++		if (sweet_dylib != NULL) {
++			const char *sweet_ep = imgp->ip_strings + strlen(EXECUTABLE_KEY);
++			boolean_t sweet_hit = FALSE;
++			if (sweet_want[0] != '\0') {
++				size_t sweet_wl = strlen(sweet_want);
++				const char *sweet_p = sweet_ep;
++				while (*sweet_p != '\0') {
++					if (strncmp(sweet_p, sweet_want, sweet_wl) == 0) {
++						sweet_hit = TRUE;
++						break;
++					}
++					sweet_p++;
++				}
++			}
++			if (sweet_hit) {
++				char sweet_env[256];
++				snprintf(sweet_env, sizeof(sweet_env),
++				    "DYLD_INSERT_LIBRARIES=%s", sweet_dylib);
++				error = exec_add_user_string(imgp,
++				    CAST_USER_ADDR_T(sweet_env), UIO_SYSSPACE, TRUE);
++				if (error) {
++					goto bad;
++				}
++				if (imgp->ip_argspace < new_ptr_size) {
++					error = E2BIG;
++					goto bad;
++				}
++				imgp->ip_argspace -= new_ptr_size;
++				imgp->ip_envc++;
++				printf("SWEET INJECT: %s <- %s\n", sweet_ep, sweet_env);
++			}
++		}
++	}
++#endif
++
+ 	/* Now, get the environment */
+ 	while (envv != 0LL) {
+ 		user_addr_t     env;
